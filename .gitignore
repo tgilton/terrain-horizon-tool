@@ -1,0 +1,31 @@
+# Python
+
+__pycache__/
+
+*.pyc
+
+# Virtual environments
+
+.venv/
+
+# macOS
+
+.DS_Store
+
+# IDEs
+
+.vscode/
+
+.idea/
+
+# Jupyter
+
+.ipynb_checkpoints/
+
+# Generated files
+
+*.png
+
+*.pdf
+EOF
+.venv/
