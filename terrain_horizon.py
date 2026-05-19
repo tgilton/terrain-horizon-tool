@@ -1,5 +1,6 @@
 import argparse
 import math
+import time
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -28,58 +29,128 @@ def destination_point(lat, lon, bearing_deg, distance_m):
     return math.degrees(lat2), math.degrees(lon2)
 
 
-def fetch_elevation(lat, lon):
-    url = "https://api.open-meteo.com/v1/elevation"
-    r = requests.get(url, params={"latitude": lat, "longitude": lon}, timeout=20)
-    r.raise_for_status()
-    return float(r.json()["elevation"][0])
-
-
-def analyze_direction(center_lat, center_lon, bearing, radius_m, samples, antenna_height_m):
-    distances = np.linspace(0, radius_m, samples)
-
+def fetch_elevations(coords, batch_size=25, pause_s=2.0):
     elevations = []
-    for d in distances:
-        lat, lon = destination_point(center_lat, center_lon, bearing, d)
-        elevations.append(fetch_elevation(lat, lon))
+    url = "https://api.open-meteo.com/v1/elevation"
 
-    elevations = np.array(elevations)
+    for i in range(0, len(coords), batch_size):
+        batch = coords[i:i + batch_size]
 
-    antenna_elevation = elevations[0] + antenna_height_m
-    terrain_angles = np.degrees(
-        np.arctan2(elevations[1:] - antenna_elevation, distances[1:])
-    )
+        lat_str = ",".join(f"{lat:.6f}" for lat, _ in batch)
+        lon_str = ",".join(f"{lon:.6f}" for _, lon in batch)
 
-    max_idx = np.argmax(terrain_angles)
+        params = {
+            "latitude": lat_str,
+            "longitude": lon_str,
+        }
 
-    return {
-        "bearing": bearing,
-        "max_angle_deg": terrain_angles[max_idx],
-        "distance_m": distances[1:][max_idx],
-        "distances": distances,
-        "elevations": elevations,
-    }
+        for attempt in range(6):
+            try:
+                r = requests.get(url, params=params, timeout=60)
+            except requests.exceptions.RequestException as e:
+                wait_s = 10 * (attempt + 1)
+                print(f"Request failed: {e}")
+                print(f"Waiting {wait_s} seconds...")
+                time.sleep(wait_s)
+                continue
 
+            if r.status_code == 429:
+                wait_s = 10 * (attempt + 1)
+                print(f"Rate limited. Waiting {wait_s} seconds...")
+                time.sleep(wait_s)
+                continue
 
-def run_analysis(lat, lon, radius_m, n_bearings, samples, antenna_height_m):
-    bearings = np.linspace(0, 360, n_bearings, endpoint=False)
-    results = []
+            r.raise_for_status()
+            data = r.json()
+            elevations.extend(data["elevation"])
+            break
 
-    for bearing in bearings:
-        print(f"Analyzing {bearing:.1f} degrees...")
-        results.append(
-            analyze_direction(lat, lon, bearing, radius_m, samples, antenna_height_m)
+        else:
+            raise RuntimeError(
+                "Elevation API failed repeatedly with rate limiting."
+            )
+
+        time.sleep(pause_s)
+
+    if len(elevations) != len(coords):
+        raise RuntimeError(
+            f"Elevation count mismatch: got {len(elevations)}, expected {len(coords)}"
         )
 
-    return results
+    return np.array(elevations, dtype=float)
+
+
+def radial_profile(center_lat, center_lon, bearing, radius_m, samples):
+    distances = np.linspace(0, radius_m, samples)
+    coords = [
+        destination_point(center_lat, center_lon, bearing, d)
+        for d in distances
+    ]
+    elevations = fetch_elevations(coords)
+    return distances, elevations
+
+
+def analyze(lat, lon, radius_m, n_bearings, samples, antenna_height_m):
+    bearings = np.linspace(0, 360, n_bearings, endpoint=False)
+    results = []
+    profiles = {}
+
+    for bearing in bearings:
+        print(f"Analyzing {bearing:.1f}°")
+
+        distances, elevations = radial_profile(
+            lat, lon, bearing, radius_m, samples
+        )
+
+        antenna_elevation = elevations[0] + antenna_height_m
+
+        terrain_angles = np.degrees(
+            np.arctan2(
+                elevations[1:] - antenna_elevation,
+                distances[1:],
+            )
+        )
+
+        max_idx = int(np.argmax(terrain_angles))
+
+        result = {
+            "bearing_deg": float(bearing),
+            "max_angle_deg": float(terrain_angles[max_idx]),
+            "distance_m": float(distances[1:][max_idx]),
+            "terrain_elevation_m": float(elevations[1:][max_idx]),
+        }
+
+        results.append(result)
+
+        profiles[float(bearing)] = {
+            "distance_m": distances,
+            "elevation_m": elevations,
+            "terrain_angle_deg": np.r_[np.nan, terrain_angles],
+        }
+
+    return results, profiles
+
+
+def save_summary_csv(results, outdir):
+    path = outdir / "horizon_summary.csv"
+
+    with path.open("w") as f:
+        f.write("bearing_deg,max_angle_deg,distance_m,terrain_elevation_m\n")
+        for r in results:
+            f.write(
+                f"{r['bearing_deg']:.1f},"
+                f"{r['max_angle_deg']:.4f},"
+                f"{r['distance_m']:.1f},"
+                f"{r['terrain_elevation_m']:.1f}\n"
+            )
 
 
 def plot_polar(results, outdir):
-    bearings = np.radians([r["bearing"] for r in results])
+    bearings = np.radians([r["bearing_deg"] for r in results])
     angles = np.array([r["max_angle_deg"] for r in results])
 
-    bearings = np.append(bearings, bearings[0])
-    angles = np.append(angles, angles[0])
+    bearings = np.r_[bearings, bearings[0]]
+    angles = np.r_[angles, angles[0]]
 
     fig = plt.figure(figsize=(8, 8))
     ax = fig.add_subplot(111, polar=True)
@@ -89,30 +160,43 @@ def plot_polar(results, outdir):
 
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1)
-    ax.set_title("Terrain Horizon Angle vs Azimuth")
+    ax.set_title("Terrain Horizon Angle vs Azimuth", pad=20)
 
     path = outdir / "polar_horizon.png"
-    plt.savefig(path, dpi=200)
+    plt.savefig(path, dpi=200, bbox_inches="tight")
     plt.show()
 
 
-def save_csv(results, outdir):
-    path = outdir / "horizon_summary.csv"
+def plot_profile(profiles, requested_bearing, outdir):
+    available = np.array(list(profiles.keys()))
+    nearest = float(available[np.argmin(np.abs(available - requested_bearing))])
+    p = profiles[nearest]
 
-    with path.open("w") as f:
-        f.write("bearing_deg,max_angle_deg,distance_m\n")
-        for r in results:
-            f.write(f"{r['bearing']:.1f},{r['max_angle_deg']:.4f},{r['distance_m']:.1f}\n")
+    plt.figure(figsize=(10, 4))
+    plt.plot(p["distance_m"] / 1000, p["elevation_m"])
+
+    plt.xlabel("Distance, km")
+    plt.ylabel("Elevation, m")
+    plt.title(f"Terrain Profile at {nearest:.1f}°")
+    plt.grid(True)
+
+    filename = f"profile_{int(round(nearest)):03d}_deg.png"
+    plt.savefig(outdir / filename, dpi=200, bbox_inches="tight")
+    plt.show()
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Analyze terrain horizon obstruction around a GPS location."
+    )
+
     parser.add_argument("--lat", type=float, required=True)
     parser.add_argument("--lon", type=float, required=True)
     parser.add_argument("--radius-m", type=float, default=20_000)
-    parser.add_argument("--n-bearings", type=int, default=36)
-    parser.add_argument("--samples", type=int, default=100)
+    parser.add_argument("--n-bearings", type=int, default=72)
+    parser.add_argument("--samples", type=int, default=200)
     parser.add_argument("--antenna-height-m", type=float, default=10)
+    parser.add_argument("--profiles", type=float, nargs="*", default=[45, 90, 270])
     parser.add_argument("--outdir", default="output")
 
     args = parser.parse_args()
@@ -120,19 +204,22 @@ def main():
     outdir = Path(args.outdir)
     outdir.mkdir(exist_ok=True)
 
-    results = run_analysis(
-        args.lat,
-        args.lon,
-        args.radius_m,
-        args.n_bearings,
-        args.samples,
-        args.antenna_height_m,
+    results, profiles = analyze(
+        lat=args.lat,
+        lon=args.lon,
+        radius_m=args.radius_m,
+        n_bearings=args.n_bearings,
+        samples=args.samples,
+        antenna_height_m=args.antenna_height_m,
     )
 
-    save_csv(results, outdir)
+    save_summary_csv(results, outdir)
     plot_polar(results, outdir)
 
-    print(f"Saved results in: {outdir.resolve()}")
+    for bearing in args.profiles:
+        plot_profile(profiles, bearing, outdir)
+
+    print(f"\nSaved output to: {outdir.resolve()}")
 
 
 if __name__ == "__main__":
