@@ -13,10 +13,6 @@ import requests
 
 EARTH_RADIUS_M = 6_371_000
 
-# DEM_PATH = "dem/USGS_13_n43w117.tif"
-
-# dem_dataset = rasterio.open(DEM_PATH)
-# dem_band = dem_dataset.read(1)
 DEM_DIR = Path("dem")
 dem_datasets = []
 for path in DEM_DIR.glob("*.tif"):
@@ -24,6 +20,14 @@ for path in DEM_DIR.glob("*.tif"):
     band = ds.read(1)
     transformer = Transformer.from_crs("EPSG:4326", ds.crs, always_xy=True)
     dem_datasets.append((path, ds, band, transformer))
+
+print("\nLoaded DEM files:")
+for path, ds, band, transformer in dem_datasets:
+    print(
+        f"{path.name}: "
+        f"lon {ds.bounds.left:.3f} to {ds.bounds.right:.3f}, "
+        f"lat {ds.bounds.bottom:.3f} to {ds.bounds.top:.3f}"
+    )
 
 def elevation_at(lat, lon):
     for path, ds, band, transformer in dem_datasets:
