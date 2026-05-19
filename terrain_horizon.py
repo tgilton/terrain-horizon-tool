@@ -10,17 +10,27 @@ import matplotlib.pyplot as plt
 import numpy as np
 import requests
 from geometry import destination_point
-from dem_manager import elevation_at
+from dem_manager import DEMManager
+
 EARTH_RADIUS_M = 6_371_000
 
+dem_manager = DEMManager()
 def radial_profile(center_lat, center_lon, bearing, radius_m, samples):
     distances = np.linspace(0, radius_m, samples)
     coords = [
         destination_point(center_lat, center_lon, bearing, d)
         for d in distances
     ]
+    
     elevations = np.array(
-        [elevation_at(lat, lon) for lat, lon in coords],
+        [
+            dem_manager.elevation_at(
+                lat,
+                lon,
+                d
+            )
+            for (lat, lon), d in zip(coords, distances)
+        ],
         dtype=float
     )
     return distances, elevations
