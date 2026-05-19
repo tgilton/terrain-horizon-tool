@@ -9,53 +9,9 @@ from pyproj import Transformer
 import matplotlib.pyplot as plt
 import numpy as np
 import requests
-
-
+from geometry import destination_point
+from dem_manager import elevation_at
 EARTH_RADIUS_M = 6_371_000
-
-DEM_DIR = Path("dem")
-dem_datasets = []
-for path in DEM_DIR.glob("*.tif"):
-    ds = rasterio.open(path)
-    band = ds.read(1)
-    transformer = Transformer.from_crs("EPSG:4326", ds.crs, always_xy=True)
-    dem_datasets.append((path, ds, band, transformer))
-
-print("\nLoaded DEM files:")
-for path, ds, band, transformer in dem_datasets:
-    print(
-        f"{path.name}: "
-        f"lon {ds.bounds.left:.3f} to {ds.bounds.right:.3f}, "
-        f"lat {ds.bounds.bottom:.3f} to {ds.bounds.top:.3f}"
-    )
-
-def elevation_at(lat, lon):
-    for path, ds, band, transformer in dem_datasets:
-        x, y = transformer.transform(lon, lat)
-        if not (ds.bounds.left <= x <= ds.bounds.right and ds.bounds.bottom <= y <= ds.bounds.top):
-            continue
-        row, col = ds.index(x, y)
-        if 0 <= row < band.shape[0] and 0 <= col < band.shape[1]:
-            return float(band[row, col])
-    return np.nan
-
-def destination_point(lat, lon, bearing_deg, distance_m):
-    lat1, lon1 = math.radians(lat), math.radians(lon)
-    bearing = math.radians(bearing_deg)
-    d = distance_m / EARTH_RADIUS_M
-
-    lat2 = math.asin(
-        math.sin(lat1) * math.cos(d)
-        + math.cos(lat1) * math.sin(d) * math.cos(bearing)
-    )
-
-    lon2 = lon1 + math.atan2(
-        math.sin(bearing) * math.sin(d) * math.cos(lat1),
-        math.cos(d) - math.sin(lat1) * math.sin(lat2),
-    )
-
-    return math.degrees(lat2), math.degrees(lon2)
-
 
 def radial_profile(center_lat, center_lon, bearing, radius_m, samples):
     distances = np.linspace(0, radius_m, samples)
@@ -69,6 +25,9 @@ def radial_profile(center_lat, center_lon, bearing, radius_m, samples):
     )
     return distances, elevations
 
+def curvature_drop_m(distance_m, k_factor=4/3):
+    effective_radius_m = EARTH_RADIUS_M * k_factor
+    return distance_m**2 / (2 * effective_radius_m)
 
 def analyze(lat, lon, radius_m, n_bearings, samples, antenna_height_m):
     bearings = np.linspace(0, 360, n_bearings, endpoint=False)
@@ -83,18 +42,21 @@ def analyze(lat, lon, radius_m, n_bearings, samples, antenna_height_m):
         )
 
         valid = ~np.isnan(elevations)
-        distances = distances[valid]
-        elevations = elevations[valid]
-        if len(elevations) < 2:
+        if valid.sum() < 2:
             print(f"Skipping {bearing:.1f}°: outside DEM coverage")
             continue
 
-        antenna_elevation = elevations[0] + antenna_height_m
+        valid_distances = distances[valid]
+        valid_elevations = elevations[valid]
 
+        antenna_elevation = valid_elevations[0] + antenna_height_m
+
+        terrain_drop = curvature_drop_m(valid_distances[1:])
+        apparent_elevations = valid_elevations[1:] - terrain_drop
         terrain_angles = np.degrees(
             np.arctan2(
-                elevations[1:] - antenna_elevation,
-                distances[1:],
+                apparent_elevations - antenna_elevation,
+                valid_distances[1:],
             )
         )
 
@@ -103,8 +65,8 @@ def analyze(lat, lon, radius_m, n_bearings, samples, antenna_height_m):
         result = {
             "bearing_deg": float(bearing),
             "max_angle_deg": float(terrain_angles[max_idx]),
-            "distance_m": float(distances[1:][max_idx]),
-            "terrain_elevation_m": float(elevations[1:][max_idx]),
+            "distance_m": float(valid_distances[1:][max_idx]),
+            "terrain_elevation_m": float(valid_elevations[1:][max_idx]),
         }
 
         results.append(result)
