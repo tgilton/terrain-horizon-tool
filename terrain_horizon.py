@@ -62,11 +62,20 @@ def analyze(lat, lon, radius_m, n_bearings, samples, antenna_height_m):
 
         max_idx = int(np.argmax(terrain_angles))
 
+        end_lat, end_lon = destination_point(
+            lat,
+            lon,
+            bearing,
+            valid_distances[1:][max_idx]
+        )
+
         result = {
             "bearing_deg": float(bearing),
             "max_angle_deg": float(terrain_angles[max_idx]),
             "distance_m": float(valid_distances[1:][max_idx]),
             "terrain_elevation_m": float(valid_elevations[1:][max_idx]),
+            "obstruction_lat": float(end_lat),
+            "obstruction_lon": float(end_lon),
         }
 
         results.append(result)
@@ -84,13 +93,15 @@ def save_summary_csv(results, outdir):
     path = outdir / "horizon_summary.csv"
 
     with path.open("w") as f:
-        f.write("bearing_deg,max_angle_deg,distance_m,terrain_elevation_m\n")
+        f.write("bearing_deg,max_angle_deg,distance_m,terrain_elevation_m,obstruction_lat,obstruction_lon\n")
         for r in results:
             f.write(
                 f"{r['bearing_deg']:.1f},"
                 f"{r['max_angle_deg']:.4f},"
                 f"{r['distance_m']:.1f},"
-                f"{r['terrain_elevation_m']:.1f}\n"
+                f"{r['terrain_elevation_m']:.1f},"
+                f"{r['obstruction_lat']:.8f},"
+                f"{r['obstruction_lon']:.8f}\n"
             )
 
 

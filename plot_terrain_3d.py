@@ -1,4 +1,6 @@
 import math
+import json
+import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import rasterio
@@ -28,13 +30,10 @@ with rasterio.open(DEM_FILE) as ds:
 
     rows, cols = data.shape
     lon_vals = np.linspace(left, right, cols)
-    lat_vals = np.linspace(bottom, top, rows)
+    lat_vals = np.linspace(top, bottom, rows)
 
     xs = ((lon_vals - CENTER_LON) * 111.32 * math.cos(math.radians(CENTER_LAT)))
-
-    ys = (
-            (lat_vals - CENTER_LAT) * 111.32
-    )
+    ys = ((lat_vals - CENTER_LAT) * 111.32)
 
 fig = go.Figure(
     data=[
@@ -75,6 +74,29 @@ fig.add_trace(
         name="Antenna"
     )
 )
+
+HORIZON_FILE = "output/horizon_summary.csv"
+
+import pandas as pd
+
+df = pd.read_csv(HORIZON_FILE)
+station_z = 840 + 10
+ray_length_km = 30
+
+HORIZON_FILE = "output/horizon_summary.csv"
+df = pd.read_csv(HORIZON_FILE)
+station_ground_z = 840
+antenna_height_m = 10
+station_z = station_ground_z + antenna_height_m
+for _, row in df.iterrows():
+    bearing_deg = row["bearing_deg"]
+    angle_deg = row["max_angle_deg"]
+    distance_km = row["distance_m"] / 1000
+    terrain_z = row["terrain_elevation_m"]
+    bearing_rad = math.radians(bearing_deg)
+    x_end = distance_km * math.sin(bearing_rad)
+    y_end = distance_km * math.cos(bearing_rad)
+    fig.add_trace(go.Scatter3d(x=[0, x_end], y=[0, y_end], z=[station_z, terrain_z], mode="lines", line=dict(width=2, color="cyan"), showlegend=False, hovertemplate=f"Bearing: {bearing_deg:.1f}°<br>Takeoff angle: {angle_deg:.2f}°<br>Distance: {distance_km:.1f} km<extra></extra>"))
 
 fig.update_layout(
     title="3D Terrain Around Station",
