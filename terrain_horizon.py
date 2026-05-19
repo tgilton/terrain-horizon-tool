@@ -3,6 +3,9 @@ import math
 import time
 from pathlib import Path
 
+import rasterio
+from pyproj import Transformer
+
 import matplotlib.pyplot as plt
 import numpy as np
 import requests
@@ -10,6 +13,27 @@ import requests
 
 EARTH_RADIUS_M = 6_371_000
 
+# DEM_PATH = "dem/USGS_13_n43w117.tif"
+
+# dem_dataset = rasterio.open(DEM_PATH)
+# dem_band = dem_dataset.read(1)
+DEM_DIR = Path("dem")
+dem_datasets = []
+for path in DEM_DIR.glob("*.tif"):
+    ds = rasterio.open(path)
+    band = ds.read(1)
+    transformer = Transformer.from_crs("EPSG:4326", ds.crs, always_xy=True)
+    dem_datasets.append((path, ds, band, transformer))
+
+def elevation_at(lat, lon):
+    for path, ds, band, transformer in dem_datasets:
+        x, y = transformer.transform(lon, lat)
+        if not (ds.bounds.left <= x <= ds.bounds.right and ds.bounds.bottom <= y <= ds.bounds.top):
+            continue
+        row, col = ds.index(x, y)
+        if 0 <= row < band.shape[0] and 0 <= col < band.shape[1]:
+            return float(band[row, col])
+    return np.nan
 
 def destination_point(lat, lon, bearing_deg, distance_m):
     lat1, lon1 = math.radians(lat), math.radians(lon)
@@ -29,64 +53,16 @@ def destination_point(lat, lon, bearing_deg, distance_m):
     return math.degrees(lat2), math.degrees(lon2)
 
 
-def fetch_elevations(coords, batch_size=25, pause_s=2.0):
-    elevations = []
-    url = "https://api.open-meteo.com/v1/elevation"
-
-    for i in range(0, len(coords), batch_size):
-        batch = coords[i:i + batch_size]
-
-        lat_str = ",".join(f"{lat:.6f}" for lat, _ in batch)
-        lon_str = ",".join(f"{lon:.6f}" for _, lon in batch)
-
-        params = {
-            "latitude": lat_str,
-            "longitude": lon_str,
-        }
-
-        for attempt in range(6):
-            try:
-                r = requests.get(url, params=params, timeout=60)
-            except requests.exceptions.RequestException as e:
-                wait_s = 10 * (attempt + 1)
-                print(f"Request failed: {e}")
-                print(f"Waiting {wait_s} seconds...")
-                time.sleep(wait_s)
-                continue
-
-            if r.status_code == 429:
-                wait_s = 10 * (attempt + 1)
-                print(f"Rate limited. Waiting {wait_s} seconds...")
-                time.sleep(wait_s)
-                continue
-
-            r.raise_for_status()
-            data = r.json()
-            elevations.extend(data["elevation"])
-            break
-
-        else:
-            raise RuntimeError(
-                "Elevation API failed repeatedly with rate limiting."
-            )
-
-        time.sleep(pause_s)
-
-    if len(elevations) != len(coords):
-        raise RuntimeError(
-            f"Elevation count mismatch: got {len(elevations)}, expected {len(coords)}"
-        )
-
-    return np.array(elevations, dtype=float)
-
-
 def radial_profile(center_lat, center_lon, bearing, radius_m, samples):
     distances = np.linspace(0, radius_m, samples)
     coords = [
         destination_point(center_lat, center_lon, bearing, d)
         for d in distances
     ]
-    elevations = fetch_elevations(coords)
+    elevations = np.array(
+        [elevation_at(lat, lon) for lat, lon in coords],
+        dtype=float
+    )
     return distances, elevations
 
 
@@ -101,6 +77,13 @@ def analyze(lat, lon, radius_m, n_bearings, samples, antenna_height_m):
         distances, elevations = radial_profile(
             lat, lon, bearing, radius_m, samples
         )
+
+        valid = ~np.isnan(elevations)
+        distances = distances[valid]
+        elevations = elevations[valid]
+        if len(elevations) < 2:
+            print(f"Skipping {bearing:.1f}°: outside DEM coverage")
+            continue
 
         antenna_elevation = elevations[0] + antenna_height_m
 
