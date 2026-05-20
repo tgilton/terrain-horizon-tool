@@ -8,112 +8,13 @@ from pyproj import Transformer
 
 import matplotlib.pyplot as plt
 import numpy as np
-import requests
-from geometry import destination_point
+# import requests
 from dem_manager import DEMManager
+from analysis import analyze, save_summary_csv
 
 EARTH_RADIUS_M = 6_371_000
 
 dem_manager = DEMManager()
-def radial_profile(center_lat, center_lon, bearing, radius_m, samples):
-    distances = np.linspace(0, radius_m, samples)
-    coords = [
-        destination_point(center_lat, center_lon, bearing, d)
-        for d in distances
-    ]
-    
-    elevations = np.array(
-        [
-            dem_manager.elevation_at(
-                lat,
-                lon,
-                d
-            )
-            for (lat, lon), d in zip(coords, distances)
-        ],
-        dtype=float
-    )
-    return distances, elevations
-
-def curvature_drop_m(distance_m, k_factor=4/3):
-    effective_radius_m = EARTH_RADIUS_M * k_factor
-    return distance_m**2 / (2 * effective_radius_m)
-
-def analyze(lat, lon, radius_m, n_bearings, samples, antenna_height_m):
-    bearings = np.linspace(0, 360, n_bearings, endpoint=False)
-    results = []
-    profiles = {}
-
-    for bearing in bearings:
-        print(f"Analyzing {bearing:.1f}°")
-
-        distances, elevations = radial_profile(
-            lat, lon, bearing, radius_m, samples
-        )
-
-        valid = ~np.isnan(elevations)
-        if valid.sum() < 2:
-            print(f"Skipping {bearing:.1f}°: outside DEM coverage")
-            continue
-
-        valid_distances = distances[valid]
-        valid_elevations = elevations[valid]
-
-        antenna_elevation = valid_elevations[0] + antenna_height_m
-
-        terrain_drop = curvature_drop_m(valid_distances[1:])
-        apparent_elevations = valid_elevations[1:] - terrain_drop
-        terrain_angles = np.degrees(
-            np.arctan2(
-                apparent_elevations - antenna_elevation,
-                valid_distances[1:],
-            )
-        )
-
-        max_idx = int(np.argmax(terrain_angles))
-
-        end_lat, end_lon = destination_point(
-            lat,
-            lon,
-            bearing,
-            valid_distances[1:][max_idx]
-        )
-
-        result = {
-            "bearing_deg": float(bearing),
-            "max_angle_deg": float(terrain_angles[max_idx]),
-            "distance_m": float(valid_distances[1:][max_idx]),
-            "terrain_elevation_m": float(valid_elevations[1:][max_idx]),
-            "obstruction_lat": float(end_lat),
-            "obstruction_lon": float(end_lon),
-        }
-
-        results.append(result)
-
-        profiles[float(bearing)] = {
-            "distance_m": distances,
-            "elevation_m": elevations,
-            "terrain_angle_deg": np.r_[np.nan, terrain_angles],
-        }
-
-    return results, profiles
-
-
-def save_summary_csv(results, outdir):
-    path = outdir / "horizon_summary.csv"
-
-    with path.open("w") as f:
-        f.write("bearing_deg,max_angle_deg,distance_m,terrain_elevation_m,obstruction_lat,obstruction_lon\n")
-        for r in results:
-            f.write(
-                f"{r['bearing_deg']:.1f},"
-                f"{r['max_angle_deg']:.4f},"
-                f"{r['distance_m']:.1f},"
-                f"{r['terrain_elevation_m']:.1f},"
-                f"{r['obstruction_lat']:.8f},"
-                f"{r['obstruction_lon']:.8f}\n"
-            )
-
 
 def plot_polar(results, outdir):
     bearings = np.radians([r["bearing_deg"] for r in results])
@@ -139,19 +40,22 @@ def plot_polar(results, outdir):
 
 def plot_profile(profiles, requested_bearing, outdir):
     available = np.array(list(profiles.keys()))
-    nearest = float(available[np.argmin(np.abs(available - requested_bearing))])
-    p = profiles[nearest]
-
-    plt.figure(figsize=(10, 4))
-    plt.plot(p["distance_m"] / 1000, p["elevation_m"])
-
-    plt.xlabel("Distance, km")
-    plt.ylabel("Elevation, m")
-    plt.title(f"Terrain Profile at {nearest:.1f}°")
-    plt.grid(True)
-
-    filename = f"profile_{int(round(nearest)):03d}_deg.png"
-    plt.savefig(outdir / filename, dpi=200, bbox_inches="tight")
+    bearing = float(available[np.argmin(np.abs(available - requested_bearing))])
+    profile = profiles[bearing]
+    distance_km = profile["distance_m"] / 1000
+    elevation_m = profile["elevation_m"]
+    angle_deg = profile["terrain_angle_deg"]
+    fig, ax1 = plt.subplots(figsize=(10, 5))
+    ax1.plot(distance_km, elevation_m, label="Terrain elevation")
+    ax1.set_xlabel("Distance, km")
+    ax1.set_ylabel("Elevation, m")
+    ax1.grid(True)
+    ax2 = ax1.twinx()
+    ax2.plot(distance_km, angle_deg, linestyle="--", label="Apparent RF angle")
+    ax2.set_ylabel("Apparent angle, degrees")
+    ax1.set_title(f"Terrain and RF Obstruction Angle at {bearing:.1f}°")
+    fig.tight_layout()
+    plt.savefig(outdir / f"profile_{bearing:.0f}_deg.png", dpi=200)
     plt.show()
 
 
