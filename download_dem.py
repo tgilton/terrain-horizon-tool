@@ -35,12 +35,17 @@ def required_tiles(lat, lon, radius_km):
             tiles.add(tile_name_for_point(sample_lat, sample_lon))
     return sorted(tiles)
 
+def _tile_resolved(tile, outdir, resolution):
+    tif_path = outdir / f"USGS_{resolution}_{tile}.tif"
+    marker_path = outdir / f"USGS_{resolution}_{tile}.notfound"
+    return tif_path.exists() or marker_path.exists()
+
 def missing_tiles(lat, lon, radius_km, outdir, resolution):
     outdir = Path(outdir)
     tiles = required_tiles(lat, lon, radius_km)
     return [
         tile for tile in tiles
-        if not (outdir / f"USGS_{resolution}_{tile}.tif").exists()
+        if not _tile_resolved(tile, outdir, resolution)
     ]
 
 def download_tile(tile, outdir, resolution):
@@ -48,14 +53,16 @@ def download_tile(tile, outdir, resolution):
     base_url = BASE_URL_TEMPLATE.format(resolution=resolution)
     filename = f"USGS_{resolution}_{tile}.tif"
     path = outdir / filename
-    if path.exists():
-        print(f"Already exists: {filename}")
+    marker_path = outdir / f"USGS_{resolution}_{tile}.notfound"
+    if path.exists() or marker_path.exists():
+        print(f"Already resolved: {filename}")
         return
     url = f"{base_url}/{tile}/{filename}"
     print(f"Downloading {filename}")
     r = requests.get(url, stream=True, timeout=60)
     if r.status_code == 404:
-        print(f"Not found: {url}")
+        print(f"Not found (marking as confirmed unavailable): {url}")
+        marker_path.touch()
         return
     r.raise_for_status()
     total = int(r.headers.get("content-length", 0))

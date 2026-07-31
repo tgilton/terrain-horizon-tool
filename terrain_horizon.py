@@ -78,6 +78,9 @@ def main():
     outdir = Path(args.outdir)
     outdir.mkdir(exist_ok=True)
 
+    for old_profile in outdir.glob("profile_*deg.png"):
+        old_profile.unlink()
+
     results, profiles = analyze(
         lat=args.lat,
         lon=args.lon,

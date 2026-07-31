@@ -60,7 +60,17 @@ if tiles_needed:
 else:
     st.sidebar.success("All elevation tiles present for this QTH/radius.")
 
-if st.button("Run terrain analysis"):
+if tiles_needed:
+    st.button("Run terrain analysis", disabled=True)
+    st.caption(
+        "Disabled until DEM coverage is verified for this station/radius -- "
+        "use 'Download missing tiles' in the sidebar first."
+    )
+    run_clicked = False
+else:
+    run_clicked = st.button("Run terrain analysis")
+
+if run_clicked:
     with st.spinner("Running analysis..."):
         result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode == 0:
@@ -72,7 +82,6 @@ if st.button("Run terrain analysis"):
 summary_file = outdir / "horizon_summary.csv"
 params_file = outdir / "run_params.json"
 polar_file = outdir / "polar_horizon.png"
-takeoff_file = outdir / "takeoff_angle_polar.png"
 
 
 def _params_match_current(params_file, lat, lon, radius_m, n_bearings, samples, antenna_height):
@@ -125,9 +134,6 @@ elif summary_file.exists():
     if polar_file.exists():
         st.header("Terrain Horizon")
         st.image(str(polar_file))
-    if takeoff_file.exists():
-        st.header("DX Takeoff Angle")
-        st.image(str(takeoff_file))
     profile_files = sorted(outdir.glob("profile_*_deg.png"))
     if profile_files:
         st.header("Terrain Profiles")
