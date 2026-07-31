@@ -9,6 +9,7 @@ from streamlit_folium import st_folium
 
 from horizon_map import build_horizon_map
 from download_dem import missing_tiles, download_tile, AVG_TILE_SIZE_MB
+from analysis import hash_file
 
 DEM_DIR = "dem_1"
 DEM_RESOLUTION = "1"
@@ -85,11 +86,18 @@ params_file = outdir / "run_params.json"
 polar_file = outdir / "polar_horizon.png"
 
 
-def _params_match_current(params_file, lat, lon, radius_m, n_bearings, samples, antenna_height):
-    if not params_file.exists():
+def _params_match_current(
+    params_file, summary_file, lat, lon, radius_m, n_bearings, samples, antenna_height
+):
+    if not params_file.exists() or not summary_file.exists():
         return False
     with params_file.open() as f:
         saved = json.load(f)
+    # The hash ties run_params.json to the exact horizon_summary.csv it was
+    # written with -- without it, a summary_file swapped in independently
+    # (e.g. restored from git) could coincidentally match stale params.
+    if saved.get("summary_hash") != hash_file(summary_file):
+        return False
     return (
         math.isclose(saved.get("lat", 0.0), lat, abs_tol=1e-6)
         and math.isclose(saved.get("lon", 0.0), lon, abs_tol=1e-6)
@@ -101,7 +109,7 @@ def _params_match_current(params_file, lat, lon, radius_m, n_bearings, samples, 
 
 
 results_current = _params_match_current(
-    params_file, lat, lon, radius_m, n_bearings, samples, antenna_height
+    params_file, summary_file, lat, lon, radius_m, n_bearings, samples, antenna_height
 )
 
 if summary_file.exists() and not results_current:

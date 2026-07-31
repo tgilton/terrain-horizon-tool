@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 import numpy as np
@@ -102,6 +103,12 @@ def save_summary_csv(results, outdir):
                 f"{r['obstruction_lat']:.8f},"
                 f"{r['obstruction_lon']:.8f}\n"
             )
+
+    return path
+
+
+def hash_file(path):
+    return hashlib.md5(path.read_bytes()).hexdigest()
 
 
 def save_run_params(params, outdir):

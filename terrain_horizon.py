@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 # import requests
 from dem_manager import DEMManager
-from analysis import analyze, save_summary_csv, save_run_params
+from analysis import analyze, save_summary_csv, save_run_params, hash_file
 
 EARTH_RADIUS_M = 6_371_000
 
@@ -90,7 +90,7 @@ def main():
         antenna_height_m=args.antenna_height_m,
     )
 
-    save_summary_csv(results, outdir)
+    summary_path = save_summary_csv(results, outdir)
     save_run_params(
         {
             "lat": args.lat,
@@ -99,6 +99,7 @@ def main():
             "n_bearings": args.n_bearings,
             "samples": args.samples,
             "antenna_height_m": args.antenna_height_m,
+            "summary_hash": hash_file(summary_path),
         },
         outdir,
     )
