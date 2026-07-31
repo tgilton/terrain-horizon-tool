@@ -20,6 +20,22 @@ DX_PATHS = {
 CARDINAL_DIRECTIONS = {"N": 0, "E": 90, "S": 180, "W": 270}
 
 
+def angle_fraction(angle_deg, threshold_deg):
+    """Maps a required-takeoff-angle to [0,1] on a fixed (not data-relative) scale:
+    0deg -> 0 (fully green), threshold_deg -> 0.5 (yellow), 2*threshold_deg -> 1 (fully red).
+
+    This is deliberately NOT normalized to the min/max of any particular run's data --
+    "red" should always mean "terrain forces an angle notably above what your antenna
+    needs," not just "the worst bearing this station happens to have."
+    """
+    span = 2 * threshold_deg if threshold_deg > 0 else 1.0
+    return max(0.0, min(1.0, angle_deg / span))
+
+
+def angle_color(angle_deg, threshold_deg, cmap):
+    return mcolors.to_hex(cmap(angle_fraction(angle_deg, threshold_deg)))
+
+
 def _wedge_points(lat, lon, bearing_deg, half_width_deg, radius_m, arc_steps=6):
     start = bearing_deg - half_width_deg
     end = bearing_deg + half_width_deg
@@ -30,18 +46,13 @@ def _wedge_points(lat, lon, bearing_deg, half_width_deg, radius_m, arc_steps=6):
     return [(lat, lon)] + arc + [(lat, lon)]
 
 
-def build_horizon_map(lat, lon, df, show_dx_paths=True, dx_radius_m=None):
+def build_horizon_map(lat, lon, df, show_dx_paths=True, dx_radius_m=None, threshold_deg=5.0):
     fmap = folium.Map(location=[lat, lon], zoom_start=9, tiles="OpenStreetMap")
 
     bearings = sorted(df["bearing_deg"].tolist())
     step = 360.0 / len(bearings) if len(bearings) > 1 else 360.0
     half_width = step / 2
 
-    vmin = float(df["max_angle_deg"].min())
-    vmax = float(df["max_angle_deg"].max())
-    if vmin == vmax:
-        vmax = vmin + 1
-    norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
     cmap = cm.get_cmap("RdYlGn_r")
 
     wedge_layer = folium.FeatureGroup(name="Takeoff angle by bearing")
@@ -49,7 +60,7 @@ def build_horizon_map(lat, lon, df, show_dx_paths=True, dx_radius_m=None):
         bearing = float(row["bearing_deg"])
         angle = float(row["max_angle_deg"])
         distance_m = float(row["distance_m"])
-        color = mcolors.to_hex(cmap(norm(angle)))
+        color = angle_color(angle, threshold_deg, cmap)
 
         points = _wedge_points(lat, lon, bearing, half_width, distance_m)
         folium.Polygon(
@@ -61,7 +72,8 @@ def build_horizon_map(lat, lon, df, show_dx_paths=True, dx_radius_m=None):
             fill_opacity=0.55,
             tooltip=(
                 f"Bearing {bearing:.0f}°<br>"
-                f"Takeoff angle {angle:.2f}°<br>"
+                f"Required takeoff angle {angle:.2f}° "
+                f"({'clear' if angle <= threshold_deg else 'above your ' + str(threshold_deg) + '° threshold'})<br>"
                 f"Obstruction {distance_m / 1000:.1f} km"
             ),
         ).add_to(wedge_layer)
@@ -114,10 +126,10 @@ def build_horizon_map(lat, lon, df, show_dx_paths=True, dx_radius_m=None):
         dx_layer.add_to(fmap)
 
     colormap = LinearColormap(
-        colors=[mcolors.to_hex(cmap(norm(v))) for v in [vmin, (vmin + vmax) / 2, vmax]],
-        vmin=vmin,
-        vmax=vmax,
-        caption="Required takeoff angle (deg)",
+        colors=[mcolors.to_hex(cmap(0)), mcolors.to_hex(cmap(0.5)), mcolors.to_hex(cmap(1.0))],
+        vmin=0,
+        vmax=2 * threshold_deg,
+        caption=f"Required takeoff angle (deg) -- {threshold_deg:.1f}° antenna threshold = yellow",
     )
     colormap.add_to(fmap)
 
