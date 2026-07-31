@@ -75,7 +75,8 @@ if run_clicked:
         result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode == 0:
         st.success("Analysis complete")
-        st.text(result.stdout[-3000:])
+        with st.expander("Analysis log"):
+            st.text(result.stdout[-3000:])
     else:
         st.error("Analysis failed")
         st.text(result.stderr)
@@ -120,6 +121,14 @@ elif summary_file.exists():
     )
     horizon_map = build_horizon_map(lat, lon, df, show_dx_paths=show_dx_paths)
     st_folium(horizon_map, width=None, height=600, returned_objects=[])
+
+    st.download_button(
+        "Download interactive map (.html)",
+        data=horizon_map.get_root().render(),
+        file_name=f"horizon_map_{lat:.4f}_{lon:.4f}.html",
+        mime="text/html",
+        help="A self-contained file you can share -- opens with full pan/zoom/tooltips in any browser, no server needed.",
+    )
 
     st.header("Horizon Summary")
     st.dataframe(df)
