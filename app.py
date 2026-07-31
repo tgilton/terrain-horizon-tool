@@ -1,3 +1,5 @@
+import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -68,9 +70,37 @@ if st.button("Run terrain analysis"):
         st.error("Analysis failed")
         st.text(result.stderr)
 summary_file = outdir / "horizon_summary.csv"
+params_file = outdir / "run_params.json"
 polar_file = outdir / "polar_horizon.png"
 takeoff_file = outdir / "takeoff_angle_polar.png"
-if summary_file.exists():
+
+
+def _params_match_current(params_file, lat, lon, radius_m, n_bearings, samples, antenna_height):
+    if not params_file.exists():
+        return False
+    with params_file.open() as f:
+        saved = json.load(f)
+    return (
+        math.isclose(saved.get("lat", 0.0), lat, abs_tol=1e-6)
+        and math.isclose(saved.get("lon", 0.0), lon, abs_tol=1e-6)
+        and int(saved.get("radius_m", -1)) == int(radius_m)
+        and int(saved.get("n_bearings", -1)) == int(n_bearings)
+        and int(saved.get("samples", -1)) == int(samples)
+        and math.isclose(saved.get("antenna_height_m", -1.0), antenna_height, abs_tol=1e-6)
+    )
+
+
+results_current = _params_match_current(
+    params_file, lat, lon, radius_m, n_bearings, samples, antenna_height
+)
+
+if summary_file.exists() and not results_current:
+    st.info(
+        "The saved results on disk were computed for a different station or "
+        "set of parameters. Click 'Run terrain analysis' to compute results "
+        "for the station currently entered above."
+    )
+elif summary_file.exists():
     df = pd.read_csv(summary_file)
 
     st.header("Horizon Map")
@@ -91,14 +121,15 @@ if summary_file.exists():
     with col2:
         st.subheader("Worst azimuths")
         st.dataframe(df.sort_values("max_angle_deg", ascending=False).head(10))
-if polar_file.exists():
-    st.header("Terrain Horizon")
-    st.image(str(polar_file))
-if takeoff_file.exists():
-    st.header("DX Takeoff Angle")
-    st.image(str(takeoff_file))
-profile_files = sorted(outdir.glob("profile_*_deg.png"))
-if profile_files:
-    st.header("Terrain Profiles")
-    for path in profile_files:
-        st.image(str(path), caption=path.name)
+
+    if polar_file.exists():
+        st.header("Terrain Horizon")
+        st.image(str(polar_file))
+    if takeoff_file.exists():
+        st.header("DX Takeoff Angle")
+        st.image(str(takeoff_file))
+    profile_files = sorted(outdir.glob("profile_*_deg.png"))
+    if profile_files:
+        st.header("Terrain Profiles")
+        for path in profile_files:
+            st.image(str(path), caption=path.name)

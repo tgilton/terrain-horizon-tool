@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 from dem_manager import DEMManager
 from geometry import destination_point
@@ -100,4 +102,10 @@ def save_summary_csv(results, outdir):
                 f"{r['obstruction_lat']:.8f},"
                 f"{r['obstruction_lon']:.8f}\n"
             )
+
+
+def save_run_params(params, outdir):
+    path = outdir / "run_params.json"
+    with path.open("w") as f:
+        json.dump(params, f)
 

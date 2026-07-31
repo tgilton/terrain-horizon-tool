@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 # import requests
 from dem_manager import DEMManager
-from analysis import analyze, save_summary_csv
+from analysis import analyze, save_summary_csv, save_run_params
 
 EARTH_RADIUS_M = 6_371_000
 
@@ -88,6 +88,17 @@ def main():
     )
 
     save_summary_csv(results, outdir)
+    save_run_params(
+        {
+            "lat": args.lat,
+            "lon": args.lon,
+            "radius_m": args.radius_m,
+            "n_bearings": args.n_bearings,
+            "samples": args.samples,
+            "antenna_height_m": args.antenna_height_m,
+        },
+        outdir,
+    )
     plot_polar(results, outdir)
 
     for bearing in args.profiles:
