@@ -81,10 +81,19 @@ def analyze(lat, lon, radius_m, n_bearings, samples, antenna_height_m):
 
         results.append(result)
 
+        # terrain_angles only covers the valid (non-NaN-elevation) samples,
+        # which can be a strict subset of the full profile when part of it
+        # falls outside DEM coverage (e.g. offshore). Scatter it back into a
+        # full-length array so it lines up with distance_m/elevation_m for
+        # plotting.
+        valid_indices = np.flatnonzero(valid)
+        full_terrain_angles = np.full(samples, np.nan)
+        full_terrain_angles[valid_indices[1:]] = terrain_angles
+
         profiles[float(bearing)] = {
             "distance_m": distances,
             "elevation_m": elevations,
-            "terrain_angle_deg": np.r_[np.nan, terrain_angles],
+            "terrain_angle_deg": full_terrain_angles,
         }
 
     return results, profiles
