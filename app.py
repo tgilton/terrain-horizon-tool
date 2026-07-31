@@ -24,7 +24,7 @@ st.sidebar.header("Analysis")
 radius_m = st.sidebar.number_input("Radius, m", value=400000, step=10000)
 n_bearings = st.sidebar.number_input("Bearings", value=72, step=12)
 samples = st.sidebar.number_input("Samples per bearing", value=800, step=100)
-profiles = st.sidebar.text_input("Profile bearings", value="45 90 180 270")
+profiles = st.sidebar.text_input("Profile bearings", value="0 90 180 270")
 st.sidebar.header("Map")
 show_dx_paths = st.sidebar.checkbox("Show DX azimuths", value=True)
 
