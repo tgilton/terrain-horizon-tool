@@ -64,14 +64,16 @@ class DEMManager:
         distance_m,
         local_radius_m=30000
     ):
-        datasets = (
-            self.high_res
-            if distance_m <= local_radius_m
-            else self.low_res
-        )
-
-        for dem in datasets:
+        for dem in self.high_res:
             if dem.contains(lat, lon):
-                return dem.elevation(lat, lon)
+                z = dem.elevation(lat, lon)
+                if not np.isnan(z):
+                    return z
+
+        for dem in self.low_res:
+            if dem.contains(lat, lon):
+                z = dem.elevation(lat, lon)
+                if not np.isnan(z):
+                    return z
 
         return np.nan
