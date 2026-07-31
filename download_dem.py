@@ -2,17 +2,14 @@ import argparse
 import math
 from pathlib import Path
 import requests
+
+from geometry import destination_point
+
 BASE_URL_TEMPLATE = "https://prd-tnm.s3.amazonaws.com/StagedProducts/Elevation/{resolution}/TIFF/current"
 
-def destination_point(lat, lon, bearing_deg, distance_m):
-    r = 6_371_000
-    lat1 = math.radians(lat)
-    lon1 = math.radians(lon)
-    bearing = math.radians(bearing_deg)
-    d = distance_m / r
-    lat2 = math.asin(math.sin(lat1) * math.cos(d) + math.cos(lat1) * math.sin(d) * math.cos(bearing))
-    lon2 = lon1 + math.atan2(math.sin(bearing) * math.sin(d) * math.cos(lat1), math.cos(d) - math.sin(lat1) * math.sin(lat2))
-    return math.degrees(lat2), math.degrees(lon2)
+# Rough average tile size on disk, used only to give the user a size estimate
+# before a bulk download; actual sizes vary with terrain relief and latitude.
+AVG_TILE_SIZE_MB = {"1": 48, "13": 400}
 
 def tile_name_for_point(lat, lon):
     north_edge = math.floor(lat) + 1
@@ -37,6 +34,14 @@ def required_tiles(lat, lon, radius_km):
             sample_lon = tile_lon + 0.5
             tiles.add(tile_name_for_point(sample_lat, sample_lon))
     return sorted(tiles)
+
+def missing_tiles(lat, lon, radius_km, outdir, resolution):
+    outdir = Path(outdir)
+    tiles = required_tiles(lat, lon, radius_km)
+    return [
+        tile for tile in tiles
+        if not (outdir / f"USGS_{resolution}_{tile}.tif").exists()
+    ]
 
 def download_tile(tile, outdir, resolution):
     outdir.mkdir(parents=True, exist_ok=True)

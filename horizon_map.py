@@ -17,6 +17,8 @@ DX_PATHS = {
     "South America": 140,
 }
 
+CARDINAL_DIRECTIONS = {"N": 0, "E": 90, "S": 180, "W": 270}
+
 
 def _wedge_points(lat, lon, bearing_deg, half_width_deg, radius_m, arc_steps=6):
     start = bearing_deg - half_width_deg
@@ -70,6 +72,21 @@ def build_horizon_map(lat, lon, df, show_dx_paths=True, dx_radius_m=None):
         tooltip="QTH",
         icon=folium.Icon(color="blue", icon="tower-broadcast", prefix="fa"),
     ).add_to(fmap)
+
+    cardinal_radius_m = float(df["distance_m"].median())
+    cardinal_layer = folium.FeatureGroup(name="Cardinal directions (N/E/S/W)")
+    for label, bearing in CARDINAL_DIRECTIONS.items():
+        pt_lat, pt_lon = destination_point(lat, lon, bearing, cardinal_radius_m)
+        folium.Marker(
+            [pt_lat, pt_lon],
+            icon=folium.DivIcon(
+                html=(
+                    '<div style="font-size:10px;font-weight:400;color:#666;'
+                    'opacity:0.7;white-space:nowrap;">' + label + "</div>"
+                )
+            ),
+        ).add_to(cardinal_layer)
+    cardinal_layer.add_to(fmap)
 
     if show_dx_paths:
         radius_m = dx_radius_m or float(df["distance_m"].max()) * 1.3

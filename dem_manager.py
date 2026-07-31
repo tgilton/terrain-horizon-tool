@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
+from rasterio.windows import Window
 from pyproj import Transformer
 
 
@@ -9,7 +10,6 @@ class DEMDataset:
     def __init__(self, path):
         self.path = path
         self.ds = rasterio.open(path)
-        self.band = self.ds.read(1)
         self.transformer = Transformer.from_crs(
             "EPSG:4326",
             self.ds.crs,
@@ -31,11 +31,13 @@ class DEMDataset:
         row, col = self.ds.index(x, y)
 
         if (
-            0 <= row < self.band.shape[0]
+            0 <= row < self.ds.height
             and
-            0 <= col < self.band.shape[1]
+            0 <= col < self.ds.width
         ):
-            return float(self.band[row, col])
+            value = self.ds.read(1, window=Window(col, row, 1, 1))
+            z = float(value[0, 0])
+            return np.nan if z == self.ds.nodata else z
 
         return np.nan
 

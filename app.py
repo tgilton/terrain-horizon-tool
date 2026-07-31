@@ -6,6 +6,10 @@ import streamlit as st
 from streamlit_folium import st_folium
 
 from horizon_map import build_horizon_map
+from download_dem import missing_tiles, download_tile, AVG_TILE_SIZE_MB
+
+DEM_DIR = "dem_1"
+DEM_RESOLUTION = "1"
 
 st.set_page_config(page_title="Terrain Horizon Tool", layout="wide")
 st.title("Terrain Horizon Tool")
@@ -32,6 +36,28 @@ cmd = [
     "--antenna-height-m", str(float(antenna_height)),
     "--profiles", *profiles.split(),
 ]
+st.sidebar.header("DEM Coverage (US only)")
+radius_km = radius_m / 1000
+tiles_needed = missing_tiles(lat, lon, radius_km, DEM_DIR, DEM_RESOLUTION)
+if tiles_needed:
+    est_mb = len(tiles_needed) * AVG_TILE_SIZE_MB[DEM_RESOLUTION]
+    st.sidebar.warning(
+        f"{len(tiles_needed)} elevation tile(s) missing for this QTH/radius "
+        f"(~{est_mb / 1024:.1f} GB). Some tiles won't exist over ocean/non-US "
+        f"area and will be skipped automatically."
+    )
+    if st.sidebar.button("Download missing tiles"):
+        progress = st.sidebar.progress(0.0)
+        status = st.sidebar.empty()
+        for i, tile in enumerate(tiles_needed):
+            status.text(f"Downloading {tile} ({i + 1}/{len(tiles_needed)})")
+            download_tile(tile, Path(DEM_DIR), DEM_RESOLUTION)
+            progress.progress((i + 1) / len(tiles_needed))
+        status.text("Done.")
+        st.rerun()
+else:
+    st.sidebar.success("All elevation tiles present for this QTH/radius.")
+
 if st.button("Run terrain analysis"):
     with st.spinner("Running analysis..."):
         result = subprocess.run(cmd, capture_output=True, text=True)
